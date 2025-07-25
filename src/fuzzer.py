@@ -99,7 +99,6 @@ def generate_input(seed_corpus):
     # else:  # 30% invalid expressions
     #     return generate_invalid_input()
     
-    # Hybrid strategy with seeds
     strategy_weights = {
         'seed_exact': 15,        # 25% - Use seed 
         'seed_mutated': 45,      # 35% - Mutate seed with techniques   
