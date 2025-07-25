@@ -8,6 +8,7 @@ import string
 import simpleeval
 import glob
 import os
+from collections import deque
 
 def load_seed_corpus(dir='corpus'):
     """Load all seed files from the corpus directory"""
@@ -91,35 +92,6 @@ def mutate_expression(expr):
     else:
         return expr  # Holder, should not reach line
 
-
-def generate_input(seed_corpus):
-    """Generate mix of valid and invalid inputs"""
-    # if random.random() < 0.7:  # 70% valid expressions
-    #     return generate_math_input() 
-    # else:  # 30% invalid expressions
-    #     return generate_invalid_input()
-    
-    strategy_weights = {
-        'seed_exact': 15,        # 25% - Use seed 
-        'seed_mutated': 45,      # 35% - Mutate seed with techniques   
-        'generated_valid': 25,   # 25% - Generate new valid
-        'generated_invalid': 15  # 15% - Generate new invalid
-    }
-    
-    strategy = random.choices(
-        list(strategy_weights.keys()),
-        weights=list(strategy_weights.values())
-    )[0]
-    
-    if strategy == 'seed_exact':
-        return random.choice(seed_corpus)
-    elif strategy == 'seed_mutated':
-        base_seed = random.choice(seed_corpus)
-        return mutate_expression(base_seed)
-    elif strategy == 'generated_valid':
-        return generate_math_input()
-    else: 
-        return generate_invalid_input()
     
 def random_value():
     """Generate Random number from 1 to 1000, float from 1 to 10, 
@@ -134,7 +106,6 @@ def random_value():
 
 def generate_math_input():
     """Generate valid mathematical expressions"""
-    # Operators for fuzzing
     binary_operators = ['+', '-', '/', '*', '%', '**', '==', '!=', '<', '>', '<=', '>=']
     bitwise_operators = ['^', '|', '&', '<<', '>>']
     
@@ -220,20 +191,61 @@ def generate_invalid_input():
     else:
         return exp
     
+def generate_input(seed_queue, max_queue_size=500):
+    """Generate mix of valid and invalid inputs using a queue-based approach"""
+    strategy_weights = {
+        'seed_exact': 15,        # 15% - Use seed exactly as is
+        'seed_mutated': 50,      # 50% - Mutate seed from queue   
+        'generated_valid': 20,   # 20% - Generate new valid
+        'generated_invalid': 15  # 15% - Generate new invalid
+    }
+    
+    strategy = random.choices(
+        list(strategy_weights.keys()),
+        weights=list(strategy_weights.values())
+    )[0]
+    
+    if strategy == 'seed_exact' and seed_queue:
+        seed = random.choice(list(seed_queue))
+        return seed, None
+        
+    elif strategy == 'seed_mutated' and seed_queue:
+        base_seed = random.choice(list(seed_queue))
+        mutated_seed = mutate_expression(base_seed)
+        
+        if mutated_seed != base_seed and len(seed_queue) < max_queue_size:
+            return mutated_seed, mutated_seed
+        else:
+            return mutated_seed, None
+            
+    elif strategy == 'generated_valid':
+        new_input = generate_math_input()
+        if len(seed_queue) < max_queue_size:
+            return new_input, new_input
+        else:
+            return new_input, None
+            
+    else: 
+        return generate_invalid_input(), None
+
+initial_seeds = load_seed_corpus('corpus')
+seed_queue = deque(initial_seeds, maxlen=1000) 
 
 success = 0
 errors = 0
 timeouts = 0
 crashes = 0
-seed_corpus = load_seed_corpus('corpus')
 
 # Run the fuzzing loop
 for i in range(1000):
     """Run main fuzzer loop for 1000 iterations"""
-    # Get fuzzer input
-    fuzz_input = generate_input(seed_corpus)
-    print(f"Case {i+1}/1000 with input: {fuzz_input}")
-    # execute input into target script
+    fuzz_input, new_seed = generate_input(seed_queue)
+    
+    if new_seed and new_seed not in seed_queue:
+        seed_queue.append(new_seed)
+    
+    print(f"Case {i+1}/1000 with input: {fuzz_input})")
+
     try:
         proc = subprocess.Popen(
             ['python3', 'src/targets.py'], 
@@ -248,6 +260,8 @@ for i in range(1000):
         if proc.returncode == 0:
             print(f"Input: {fuzz_input}, Result: {stdout.strip()}")
             success += 1
+            if len(seed_queue) < 800 and fuzz_input not in seed_queue:
+                seed_queue.append(fuzz_input)
         else:
             print(f"Input: {fuzz_input}, Error: {stderr.strip()}")
             errors += 1
@@ -262,3 +276,4 @@ for i in range(1000):
 
 print(f"\nFuzzer Testing Summary\n------------------------")
 print(f"Success: {success}\nErrors: {errors}\nTimeouts: {timeouts}\nCrashes: {crashes}")
+print(f"Final queue size: {len(seed_queue)}")
